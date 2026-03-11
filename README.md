@@ -26,44 +26,117 @@ WavLM + GRU モデルを少量のラベル付き実環境データで教師あ�
 
 ---
 
-## 手法
+## データセット準備
 
-### Stage 1: 教師あり Fine-tuning（`main_runner.py`）
+### ディレクトリ構成
 
-ラベル付き実環境データを用いてモデルを Fine-tuning します。
-アーキテクチャは WavLM Base+ による特徴抽出と，GRU によるフレームレベルの2クラス分類（嚥下 vs. その他）で構成されます。
-
-**論文における学習構成：**
-
-- モデル (1): 制御環境録音のみ
-- モデル (2): + 音声データ拡張（Common Voice 約30時間）
-- モデル (3): + ラベル付き実環境データ（約1時間）
-
-### Stage 2: Mean Teacher 半教師あり適応（`semi_supervised_top.py`）
-
-約85時間のラベルなし実環境録音を Mean Teacher フレームワークで活用します。
-
-**EMA 更新：**
 ```
-θ_T^(k) = β · θ_T^(k-1) + (1 - β) · θ_S^(k)
-```
-
-**信頼度マスク付き教師なし損失：**
-```
-L_unsup = (1/N) Σ m_t · BCE(p_t, p̂_t)
-m_t = 1 if p_t ≥ τ, else 0
+dataset/
+├── exist_label/               # ラベル付き実環境データ（Stage 1 学習・Stage 2 検証用）
+│   ├── 301.wav                # 4ch合成・HPF済みシングルchWAV（参加者ごと）
+│   ├── 301.txt                # アノテーションファイル（参加者ごと）
+│   ├── divide_wav/            # 10秒セグメントに分割したWAV（自動生成）
+│   ├── divide_txt/            # 対応するアノテーション（自動生成）
+│   ├── exist_label_train.json # 学習用JSONリスト（自動生成）
+│   └── exist_label_valid.json # 検証用JSONリスト（自動生成）
+├── no_label/                  # ラベルなし実環境データ（Stage 2 学習用）
+│   └── <収録日>/<参加者ID>/
+│       ├── MIC1.WAV           # チャンネル1
+│       ├── MIC2.WAV           # チャンネル2
+│       ├── MIC3.WAV           # チャンネル3
+│       └── MIC4.WAV           # チャンネル4
+└── test_data/                 # テストデータ
+    ├── <日付>_<ID>_MIC1_MIC2_MIC3_MIC4_HPF.wav
+    └── <日付>_<ID>_MIC1_MIC2_MIC3_MIC4_HPF.txt
 ```
 
-**総損失：**
-```
-L = L_sup + α · L_unsup
+---
+
+### ステップ 1：生録音の前処理（4ch → 1ch + ハイパスフィルタ）
+
+生録音は4チャンネル（MIC1〜MIC4）で収録されています。
+これらをチャンネル平均で合成し，100 Hz ハイパスフィルタを適用してシングルチャンネルWAVを生成します。
+
+```bash
+python prepare/5_db_combined_hpf.py \
+    --input-dir dataset/no_label/<収録日>/<参加者ID>/ \
+    --output-dir dataset/exist_label/
 ```
 
-**ハイパーパラメータ（論文設定値）：**
-- EMA 減衰率 β = 0.999
-- 信頼度閾値 τ = 0.5
-- 教師なし損失重み α = 1.0
-- 学習率 = 1×10⁻⁷（Adam）
+処理後の出力ファイル名例：
+```
+301_MIC1_MIC2_MIC3_MIC4_HPF.wav
+```
+
+> **注意：ラベルなしデータについて**
+> Stage 2 の学習には `--unlabeled-root` で指定したディレクトリ以下の `.wav` ファイルをすべて再帰的に使用します（`rglob("*.wav")`）。
+> 多チャンネルWAVはコードが自動的にチャンネル平均してモノラル化するため，`dataset/no_label/` を直接指定することも可能です。
+
+---
+
+### ステップ 2：アノテーションファイルの作成（ラベル付きデータのみ）
+
+アノテーションは以下の形式のテキストファイルです（`.txt`）：
+
+```
+5.01    5.53    sw
+50.44   51.14   sw
+96.02   96.63   sw
+```
+
+各行は `<開始秒> <終了秒> <ラベル>` の形式です。
+
+| ラベル | 意味 |
+|--------|------|
+| `sw` | 嚥下（swallowing） |
+| `ch` | 咀嚼（chewing） |
+
+`.wav` と同じファイル名の `.txt` を同じディレクトリに配置してください（例：`301.wav` と `301.txt`）。
+
+---
+
+### ステップ 3：学習用JSONリストの作成（ラベル付きデータのみ）
+
+WAVファイルを10秒セグメントに分割し，学習用JSONを生成します。
+`prepare/8_real_data_to_train.ipynb` を実行してください。
+
+```
+BASE_DIR = dataset/exist_label/   # WAV・TXTファイルが置かれているディレクトリ
+SEG_LEN  = 10.0 秒
+OVERLAP  = 1.0 秒
+TARGET_SR = 16000 Hz
+```
+
+実行後に以下が生成されます：
+- `dataset/exist_label/divide_wav/` ─ 分割済みWAV
+- `dataset/exist_label/divide_wav/exist_label_divided.json` ─ セグメントのJSONリスト
+
+その後，train/validに分割したJSONを作成し，`config_FT_real.json` の以下のパスに指定します：
+
+```json
+"train_json": "./json/fit1/exist_label_train.json",
+"val_json":   "./json/fit1/exist_label_valid.json",
+"test_json":  "./json/fit1/exist_label_valid.json"
+```
+
+JSONリストの形式：
+
+```json
+[
+  {
+    "path": "dataset/exist_label/divide_wav/301_seg001.wav",
+    "timestamps": {
+      "swallowing": [[4.13, 4.78], [10.2, 10.9]],
+      "chewing":    [],
+      "speech":     [],
+      "noise":      [],
+      "mask":       []
+    }
+  }
+]
+```
+
+`"mask"` に時間区間を指定すると，その区間は損失計算から除外されます。
 
 ---
 
@@ -90,17 +163,17 @@ swallowing_segmentation_meanteacher/
 
 ---
 
-## 使い方
+## 学習手順
 
 ### 必要ライブラリ
 
 ```bash
-pip install torch torchaudio transformers tqdm audiomentations
+pip install torch torchaudio transformers tqdm audiomentations soundfile scipy
 ```
 
-### Stage 1: 教師あり Fine-tuning
+### Stage 1: 教師あり Fine-tuning（`main_runner.py`）
 
-アノテーション JSON ファイルを準備し，設定ファイル内のパスを適宜更新してください。
+データ準備が完了したら，設定ファイルの JSON パスを実際のパスに更新して実行します。
 
 ```bash
 # 学習（モデル (3)：+ ラベル付き実環境データ）
@@ -113,20 +186,48 @@ python main_runner.py --config config_FT_real.json --test
 python main_runner.py --config config_FT_real.json --finetune
 ```
 
-### Stage 2: Mean Teacher 半教師あり適応
+**主要なコマンドラインオプション：**
+
+| オプション | 説明 |
+|-----------|------|
+| `--config` | JSON 設定ファイルのパス（デフォルト：`config_FT_real.json`） |
+| `--test` | テスト評価のみ実施（学習なし） |
+| `--finetune` | 既存チェックポイントから patience をリセットして継続学習 |
+| `--data-workers` | DataLoader のワーカー数上限（デフォルト：0） |
+
+### Stage 2: Mean Teacher 半教師あり適応（`semi_supervised_top.py`）
+
+Stage 1 で得たモデルを起点に，ラベルなし実環境データで適応します。
 
 ```bash
-# ラベルなし実環境データを用いた学習
 python semi_supervised_top.py \
     --config config_FT_meanteacher_real.json \
-    --unlabeled-root /path/to/unlabeled/wav \
+    --unlabeled-root dataset/no_label/ \
+    --exist-label-dir dataset/exist_label/ \
     --ema-decay 0.999 \
     --confidence-threshold 0.5 \
     --w-unsup 1.0 \
     --epochs 300 \
     --lr 1e-7
+```
 
-# WAV ファイルへの推論
+**主要なコマンドラインオプション：**
+
+| オプション | デフォルト | 説明 |
+|-----------|-----------|------|
+| `--config` | `config_FT_meanteacher_real.json` | JSON 設定ファイル |
+| `--unlabeled-root` | `prepare/downloaded_folder/behavior/wav_sync` | ラベルなしWAVディレクトリ（再帰検索） |
+| `--exist-label-dir` | `dataset/exist_label` | ラベル付きデータディレクトリ（検証用） |
+| `--ema-decay` | `0.999` | Teacher モデルの EMA 減衰率（論文値：0.999） |
+| `--confidence-threshold` | `0.9999` | 擬似ラベルの採用信頼度閾値（論文値：0.5） |
+| `--w-unsup` | `1.0` | 教師なし損失の重み α（論文値：1.0） |
+| `--epochs` | `100` | 学習エポック数 |
+| `--lr` | `1e-7` | 学習率 |
+| `--real-eval` | - | 検証時にラベル付き実データで評価する |
+
+**WAVファイルへの推論：**
+
+```bash
 python semi_supervised_top.py \
     --inference-wav /path/to/audio.wav \
     --inference-threshold 0.5
@@ -144,25 +245,43 @@ torchrun --nproc_per_node=GPU数 semi_supervised_top.py --config config_FT_meant
 
 ---
 
-## データ形式
+## 手法
 
-アノテーション JSON ファイルの形式：
+### Stage 1: 教師あり Fine-tuning
 
-```json
-[
-  {
-    "wav": "/path/to/audio.wav",
-    "events": [
-      {"label": "swallowing", "start": 1.2, "end": 1.8},
-      {"label": "chewing", "start": 2.0, "end": 2.5}
-    ]
-  }
-]
+モデル (1)〜(3) は教師あり学習で学習します：
+- **(1)** 制御環境録音のみで学習
+- **(2)** + Common Voice 約30時間の音声データで拡張学習
+- **(3)** + ラベル付き実環境データ（約1時間）で Fine-tuning
+
+### Stage 2: Mean Teacher 半教師あり適応
+
+ラベルなし実環境データ（約85時間）を Mean Teacher フレームワークで活用します。
+
+**EMA 更新（Teacher モデルの更新）：**
+```
+θ_T^(k) = β · θ_T^(k-1) + (1 - β) · θ_S^(k)
 ```
 
-2クラス分類のクラスマッピング（嚥下 vs. その他）：
-- `"swallowing"` → `"swallowing"`
-- `"chewing"`, `"speech"`, `"background"`, `"blank"` → `"others"`
+**信頼度マスク付き教師なし損失：**
+```
+L_unsup = (1/N) Σ m_t · BCE(p_t, p̂_t)
+m_t = 1 if p_t ≥ τ, else 0
+```
+
+**総損失：**
+```
+L = L_sup + α · L_unsup
+```
+
+**ハイパーパラメータ（論文設定値）：**
+
+| パラメータ | 値 | 説明 |
+|-----------|-----|------|
+| β | 0.999 | EMA 減衰率 |
+| τ | 0.5 | 擬似ラベル信頼度閾値 |
+| α | 1.0 | 教師なし損失の重み |
+| lr | 1×10⁻⁷ | Adam 学習率 |
 
 ---
 

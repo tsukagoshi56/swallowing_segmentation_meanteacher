@@ -98,7 +98,7 @@ python prepare/5_db_combined_hpf.py \
 ### ステップ 3：学習用JSONリストの作成（ラベル付きデータのみ）
 
 WAVファイルを10秒セグメントに分割し，学習用JSONを生成します。
-`prepare/8_real_data_to_train.ipynb` を実行してください。
+`prepare/8_real_data_to_train.ipynb`（または `prepare/9_tsukagoshi_real_data_to_train.ipynb`）を実行してください。
 
 ```
 BASE_DIR = dataset/exist_label/   # WAV・TXTファイルが置かれているディレクトリ
@@ -140,6 +140,23 @@ JSONリストの形式：
 
 ---
 
+## prepare/ ノートブック一覧
+
+| ノートブック | 用途 | 対応する学習設定 |
+|-------------|------|-----------------|
+| `0_database_preproccessing.ipynb` | 制御環境データセットのダウンロード・整理 | モデル (1) |
+| `0_Eat_behavior_dataset_w.ipynb` | 食事行動データセットのセグメント化・16kHzリサンプリング | モデル (1) |
+| `0.1_db_combined_HPF.ipynb` | 多チャンネルWAVのHPFフィルタ処理・チャンネル合成 | モデル (1) |
+| `2_eating_json.ipynb` | 制御環境データのJSON形式変換 | モデル (1) |
+| `1.1_ATR_nhk.ipynb` | ATR503・NHK40 音声コーパスの前処理・VAD JSON生成 | モデル (2) |
+| `1_commonvoice_json_.ipynb` | Common Voice 日本語データのVAD JSON生成 | モデル (2) |
+| `8_real_data_to_train.ipynb` | ラベル付き実環境データを10秒セグメントに分割してJSON生成 | モデル (3) |
+| `9_tsukagoshi_real_data_to_train.ipynb` | ラベルなし実環境データのセグメント化・JSON生成 | モデル (4) |
+| `4_threshold_check.ipynb` | 検出閾値の精度-再現率曲線分析 | 評価・分析 |
+| `7_test_results.ipynb` | 被験者ごと・IoU閾値ごとの詳細評価 | 評価・分析 |
+
+---
+
 ## ファイル構成
 
 ```
@@ -158,7 +175,18 @@ swallowing_segmentation_meanteacher/
 ├── config_FT_real_2.json             # Stage 1 設定バリアント（lr=1e-8）
 ├── config_FT_meanteacher_real.json   # Stage 2 設定（α=0.5 バリアント）
 ├── config_FT_meanteacher_real_2.json # Stage 2 設定（α=0.1 バリアント）
-└── config_FT_meanteacher_real_3.json # Stage 2 設定（α=0.01 バリアント）
+├── config_FT_meanteacher_real_3.json # Stage 2 設定（α=0.01 バリアント）
+└── prepare/                          # データセット準備ノートブック群
+    ├── 0_database_preproccessing.ipynb     # 制御環境データのダウンロード
+    ├── 0_Eat_behavior_dataset_w.ipynb      # 食事行動データセットの前処理
+    ├── 0.1_db_combined_HPF.ipynb           # 多ch合成・HPFフィルタ
+    ├── 2_eating_json.ipynb                 # 制御環境データのJSON変換
+    ├── 1.1_ATR_nhk.ipynb                   # ATR503/NHK40 音声コーパス前処理
+    ├── 1_commonvoice_json_.ipynb           # Common Voice JSON生成
+    ├── 8_real_data_to_train.ipynb          # ラベル付き実環境データのJSON生成
+    ├── 9_tsukagoshi_real_data_to_train.ipynb # ラベルなし実環境データのJSON生成
+    ├── 4_threshold_check.ipynb             # 閾値分析
+    └── 7_test_results.ipynb                # テスト結果評価
 ```
 
 ---

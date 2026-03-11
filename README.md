@@ -1,122 +1,122 @@
-# Semi-Supervised Real-World Adaptation for Swallowing Sound Detection
+# 嚥下音検出のための半教師あり実環境適応
 
-Implementation of the paper:
+以下の論文の実装です：
 
 > **"Semi-Supervised Real-World Adaptation for Swallowing Sound Detection"**
-> Toshihiro Tsukagoshi, Masafumi Nishida, Masafumi Nishimura
-> NCSP 2026, Shizuoka University / Aichi Sangyo University
+> 塚越俊宏，西田雅史，西村雅史
+> NCSP 2026，静岡大学 / 愛知産業大学
 
 ---
 
-## Overview
+## 概要
 
-This repository implements a two-stage semi-supervised learning framework for detecting swallowing sounds from skin-contact microphone recordings in real-world dining environments.
+皮膚接触型マイクを用いた実環境（自然な食事場面）での嚥下音検出を目的とした，2段階の半教師あり学習フレームワークの実装です。
 
-**Key idea:**
-A WavLM + GRU model is first fine-tuned on a small labeled real-world dataset (Stage 1), then further adapted using a large unlabeled real-world dataset via the Mean Teacher framework (Stage 2).
+**基本的なアイデア：**
+WavLM + GRU モデルを少量のラベル付き実環境データで教師あり Fine-tuning（Stage 1）した後，Mean Teacher フレームワークを用いて大量のラベルなし実環境データでさらに適応（Stage 2）します。
 
-### Results (Event-based F1 at IoU=0.1)
+### 結果（イベントベース F1，IoU=0.1）
 
-| Model | Pizza | Apple | Cracker | Overall |
-|-------|-------|-------|---------|---------|
-| (1) Controlled recordings only | 0.451 | 0.450 | 0.609 | 0.470 |
-| (2) + Speech data (30h) | 0.785 | 0.684 | 0.789 | 0.756 |
-| (3) + Labeled real-world data (1h) | 0.932 | 0.838 | 0.897 | 0.899 |
-| **(4) + Unlabeled real-world data (85h) [Proposed]** | **0.947** | **0.903** | **0.950** | **0.933** |
+| モデル | ピザ | りんご | クラッカー | 全体 |
+|--------|------|--------|------------|------|
+| (1) 制御環境録音のみ | 0.451 | 0.450 | 0.609 | 0.470 |
+| (2) + 音声データ（30時間） | 0.785 | 0.684 | 0.789 | 0.756 |
+| (3) + ラベル付き実環境データ（1時間） | 0.932 | 0.838 | 0.897 | 0.899 |
+| **(4) + ラベルなし実環境データ（85時間）【提案手法】** | **0.947** | **0.903** | **0.950** | **0.933** |
 
 ---
 
-## Method
+## 手法
 
-### Stage 1: Supervised Fine-tuning (`main_runner.py`)
+### Stage 1: 教師あり Fine-tuning（`main_runner.py`）
 
-Fine-tunes the model on labeled real-world data.
-The architecture consists of a WavLM Base+ feature extractor and a GRU-based temporal module for frame-level binary classification (swallowing vs. others).
+ラベル付き実環境データを用いてモデルを Fine-tuning します。
+アーキテクチャは WavLM Base+ による特徴抽出と，GRU によるフレームレベルの2クラス分類（嚥下 vs. その他）で構成されます。
 
-**Training configurations (matching paper):**
+**論文における学習構成：**
 
-- Model (1): Controlled-environment recordings only
-- Model (2): + Speech data augmentation (Common Voice ~30h)
-- Model (3): + Labeled real-world data (~1h)
+- モデル (1): 制御環境録音のみ
+- モデル (2): + 音声データ拡張（Common Voice 約30時間）
+- モデル (3): + ラベル付き実環境データ（約1時間）
 
-### Stage 2: Mean Teacher Semi-supervised Adaptation (`semi_supervised_top.py`)
+### Stage 2: Mean Teacher 半教師あり適応（`semi_supervised_top.py`）
 
-Leverages ~85h of unlabeled real-world recordings via the Mean Teacher framework.
+約85時間のラベルなし実環境録音を Mean Teacher フレームワークで活用します。
 
-**EMA update:**
+**EMA 更新：**
 ```
 θ_T^(k) = β · θ_T^(k-1) + (1 - β) · θ_S^(k)
 ```
 
-**Confidence-masked unsupervised loss:**
+**信頼度マスク付き教師なし損失：**
 ```
 L_unsup = (1/N) Σ m_t · BCE(p_t, p̂_t)
 m_t = 1 if p_t ≥ τ, else 0
 ```
 
-**Total loss:**
+**総損失：**
 ```
 L = L_sup + α · L_unsup
 ```
 
-**Hyperparameters (paper values):**
-- EMA decay β = 0.999
-- Confidence threshold τ = 0.5
-- Unsupervised loss weight α = 1.0
-- Learning rate = 1×10⁻⁷ (Adam)
+**ハイパーパラメータ（論文設定値）：**
+- EMA 減衰率 β = 0.999
+- 信頼度閾値 τ = 0.5
+- 教師なし損失重み α = 1.0
+- 学習率 = 1×10⁻⁷（Adam）
 
 ---
 
-## File Structure
+## ファイル構成
 
 ```
 swallowing_segmentation_meanteacher/
-├── main_runner.py                    # Stage 1: Supervised fine-tuning entry point
-├── semi_supervised_top.py            # Stage 2: Mean Teacher semi-supervised training
-├── training.py                       # Training/evaluation loop functions
-├── models.py                         # EventDetector model (WavLM + GRU)
-├── data_utils.py                     # SoundEventDataset and data loading utilities
-├── metrics.py                        # Event-based precision/recall/F1 (IoU-based)
-├── exp_config.py                     # Experiment configuration constants
-├── ddp_utils.py                      # Distributed Data Parallel utilities
-├── inference.py                      # Test evaluation functions (used by main_runner.py)
-├── inference_wav.py                  # WAV-level inference functions (used by semi_supervised_top.py)
-├── config_FT_real.json               # Config for Stage 1 (lr=1e-7, balanced weight)
-├── config_FT_real_2.json             # Config for Stage 1 variant (lr=1e-8)
-├── config_FT_meanteacher_real.json   # Config for Stage 2 (α=0.5 variant)
-├── config_FT_meanteacher_real_2.json # Config for Stage 2 (α=0.1 variant)
-└── config_FT_meanteacher_real_3.json # Config for Stage 2 (α=0.01 variant)
+├── main_runner.py                    # Stage 1: 教師あり Fine-tuning のエントリポイント
+├── semi_supervised_top.py            # Stage 2: Mean Teacher 半教師あり学習
+├── training.py                       # 学習・評価ループ
+├── models.py                         # EventDetector モデル（WavLM + GRU）
+├── data_utils.py                     # データセットクラス・データローダ
+├── metrics.py                        # IoU ベースのイベント検出評価指標
+├── exp_config.py                     # 実験設定定数
+├── ddp_utils.py                      # 分散学習（DDP）ユーティリティ
+├── inference.py                      # テスト評価（main_runner.py から使用）
+├── inference_wav.py                  # WAV ファイル推論（semi_supervised_top.py から使用）
+├── config_FT_real.json               # Stage 1 設定（lr=1e-7，バランス重み付き）
+├── config_FT_real_2.json             # Stage 1 設定バリアント（lr=1e-8）
+├── config_FT_meanteacher_real.json   # Stage 2 設定（α=0.5 バリアント）
+├── config_FT_meanteacher_real_2.json # Stage 2 設定（α=0.1 バリアント）
+└── config_FT_meanteacher_real_3.json # Stage 2 設定（α=0.01 バリアント）
 ```
 
 ---
 
-## Usage
+## 使い方
 
-### Prerequisites
+### 必要ライブラリ
 
 ```bash
 pip install torch torchaudio transformers tqdm audiomentations
 ```
 
-### Stage 1: Supervised Fine-tuning
+### Stage 1: 教師あり Fine-tuning
 
-Prepare annotation JSON files for labeled data and update paths in the config file.
+アノテーション JSON ファイルを準備し，設定ファイル内のパスを適宜更新してください。
 
 ```bash
-# Training (model 3: + labeled real-world data)
+# 学習（モデル (3)：+ ラベル付き実環境データ）
 python main_runner.py --config config_FT_real.json
 
-# Test only
+# テストのみ
 python main_runner.py --config config_FT_real.json --test
 
-# Fine-tuning from existing checkpoint
+# チェックポイントから Fine-tuning 継続
 python main_runner.py --config config_FT_real.json --finetune
 ```
 
-### Stage 2: Mean Teacher Semi-supervised Adaptation
+### Stage 2: Mean Teacher 半教師あり適応
 
 ```bash
-# Training with unlabeled real-world data
+# ラベルなし実環境データを用いた学習
 python semi_supervised_top.py \
     --config config_FT_meanteacher_real.json \
     --unlabeled-root /path/to/unlabeled/wav \
@@ -126,27 +126,27 @@ python semi_supervised_top.py \
     --epochs 300 \
     --lr 1e-7
 
-# Inference on audio folder
+# WAV ファイルへの推論
 python semi_supervised_top.py \
     --inference-wav /path/to/audio.wav \
     --inference-threshold 0.5
 ```
 
-### Multi-GPU (DDP) Training
+### マルチ GPU 学習（DDP）
 
 ```bash
 # Stage 1
-torchrun --nproc_per_node=NUM_GPUS main_runner.py --config config_FT_real.json
+torchrun --nproc_per_node=GPU数 main_runner.py --config config_FT_real.json
 
 # Stage 2
-torchrun --nproc_per_node=NUM_GPUS semi_supervised_top.py --config config_FT_meanteacher_real.json
+torchrun --nproc_per_node=GPU数 semi_supervised_top.py --config config_FT_meanteacher_real.json
 ```
 
 ---
 
-## Data Format
+## データ形式
 
-Annotation JSON files follow this format:
+アノテーション JSON ファイルの形式：
 
 ```json
 [
@@ -160,39 +160,39 @@ Annotation JSON files follow this format:
 ]
 ```
 
-Class mapping for binary classification (swallowing vs. others):
+2クラス分類のクラスマッピング（嚥下 vs. その他）：
 - `"swallowing"` → `"swallowing"`
 - `"chewing"`, `"speech"`, `"background"`, `"blank"` → `"others"`
 
 ---
 
-## Model Architecture
+## モデルアーキテクチャ
 
 ```
-Raw waveform (16kHz)
+生波形（16kHz）
     ↓
-WavLM Base+ (microsoft/wavlm-base)
-    ↓ [freeze feature extractor, fine-tune transformer layers]
-Frame-level embeddings (768-dim, hop=20ms)
+WavLM Base+（microsoft/wavlm-base）
+    ↓ [特徴抽出器を凍結，Transformer 層を Fine-tuning]
+フレームレベル埋め込み（768次元，ホップ20ms）
     ↓
-GRU (temporal modeling)
+GRU（時系列モデリング）
     ↓
 Linear + Sigmoid
     ↓
-Frame-level binary predictions (swallowing / others)
+フレームレベル2クラス予測（嚥下 / その他）
 ```
 
 ---
 
-## Evaluation
+## 評価指標
 
-Event-based metrics using IoU thresholds. A predicted event is correct if temporal overlap with ground truth exceeds the IoU threshold.
+IoU 閾値を用いたイベントベースの指標を使用します。予測イベントは，Ground Truth との時間的重なりが IoU 閾値を超えた場合に正解とみなします。
 
-Primary metric: **F1 at IoU=0.1** (detection-oriented, lenient boundary matching)
+主評価指標：**F1（IoU=0.1）**（検出重視，境界の許容度が高い設定）
 
 ---
 
-## Citation
+## 引用
 
 ```
 @inproceedings{tsukagoshi2026ncsp,
@@ -205,8 +205,8 @@ Primary metric: **F1 at IoU=0.1** (detection-oriented, lenient boundary matching
 
 ---
 
-## Related Work
+## 関連研究
 
-- [tsukagoshi2024ssl] SSL-based chewing and swallowing detection using multiple skin-contact microphones (APSIPA ASC 2024)
-- [tsukagoshi2025simultaneous] Simultaneous speech and eating behavior recognition using data augmentation and two-stage fine-tuning (Sensors 2025)
-- [tsukagoshi2025gcce] Swallowing sound segmentation using self-supervised learning-based features (IEEE GCCE 2025)
+- SSL-based chewing and swallowing detection using multiple skin-contact microphones (APSIPA ASC 2024)
+- Simultaneous speech and eating behavior recognition using data augmentation and two-stage fine-tuning (Sensors 2025)
+- Swallowing sound segmentation using self-supervised learning-based features (IEEE GCCE 2025)

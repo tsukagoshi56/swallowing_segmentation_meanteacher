@@ -52,66 +52,47 @@ dataset/
 
 ---
 
-### ステップ 1：生録音の前処理（4ch → 1ch + ハイパスフィルタ）
+### A. ラベル付きデータの準備（モデル (1)〜(3) 用）
 
-生録音は4チャンネル（MIC1〜MIC4）で収録されています。
-これらをチャンネル平均で合成し，100 Hz ハイパスフィルタを適用してシングルチャンネルWAVを生成します。
+以下のノートブックを **順番に** 実行してください。
 
-```bash
-python prepare/5_db_combined_hpf.py \
-    --input-dir dataset/no_label/<収録日>/<参加者ID>/ \
-    --output-dir dataset/exist_label/
+#### ステップ A-1：制御環境データのダウンロード・整理
 ```
-
-処理後の出力ファイル名例：
+prepare/0_database_preproccessing.ipynb
 ```
-301_MIC1_MIC2_MIC3_MIC4_HPF.wav
+食事行動データセット（制御環境録音）を Google Drive からダウンロードし，WAV・アノテーションファイルを整理します。
+
+#### ステップ A-2：データセグメント化・リサンプリング
 ```
+prepare/0_Eat_behavior_dataset_w.ipynb
+```
+音声を16kHzにリサンプリングし，チューイング・嚥下・ノイズのラベルとともにセグメント化します。
 
-> **注意：ラベルなしデータについて**
-> Stage 2 の学習には `--unlabeled-root` で指定したディレクトリ以下の `.wav` ファイルをすべて再帰的に使用します（`rglob("*.wav")`）。
-> 多チャンネルWAVはコードが自動的にチャンネル平均してモノラル化するため，`dataset/no_label/` を直接指定することも可能です。
+#### ステップ A-3：JSON形式への変換
+```
+prepare/2_eating_json.ipynb
+```
+制御環境データをモデルが読み込める JSON 形式に変換します（`sw`=嚥下，`ch`=咀嚼）。
 
----
+#### ステップ A-4：ラベル付き実環境データの準備（モデル (3) 用）
+```
+prepare/8_real_data_to_train.ipynb
+```
+ラベル付き実環境WAVとアノテーション（`.txt`）を10秒セグメントに分割してJSONを生成します。
 
-### ステップ 2：アノテーションファイルの作成（ラベル付きデータのみ）
-
-アノテーションは以下の形式のテキストファイルです（`.txt`）：
-
+アノテーション `.txt` ファイルの形式：
 ```
 5.01    5.53    sw
 50.44   51.14   sw
 96.02   96.63   sw
 ```
-
-各行は `<開始秒> <終了秒> <ラベル>` の形式です。
-
-| ラベル | 意味 |
-|--------|------|
-| `sw` | 嚥下（swallowing） |
-| `ch` | 咀嚼（chewing） |
-
-`.wav` と同じファイル名の `.txt` を同じディレクトリに配置してください（例：`301.wav` と `301.txt`）。
-
----
-
-### ステップ 3：学習用JSONリストの作成（ラベル付きデータのみ）
-
-WAVファイルを10秒セグメントに分割し，学習用JSONを生成します。
-`prepare/8_real_data_to_train.ipynb`（または `prepare/9_tsukagoshi_real_data_to_train.ipynb`）を実行してください。
-
-```
-BASE_DIR = dataset/exist_label/   # WAV・TXTファイルが置かれているディレクトリ
-SEG_LEN  = 10.0 秒
-OVERLAP  = 1.0 秒
-TARGET_SR = 16000 Hz
-```
+各行は `<開始秒> <終了秒> <ラベル>`。ラベルは `sw`（嚥下）または `ch`（咀嚼）。
 
 実行後に以下が生成されます：
 - `dataset/exist_label/divide_wav/` ─ 分割済みWAV
-- `dataset/exist_label/divide_wav/exist_label_divided.json` ─ セグメントのJSONリスト
+- `dataset/exist_label/exist_label_divided.json` ─ セグメントのJSONリスト
 
-その後，train/validに分割したJSONを作成し，`config_FT_real.json` の以下のパスに指定します：
+生成したJSONをtrain/validに分割して `config_FT_real.json` に指定します：
 
 ```json
 "train_json": "./json/fit1/exist_label_train.json",
@@ -119,8 +100,7 @@ TARGET_SR = 16000 Hz
 "test_json":  "./json/fit1/exist_label_valid.json"
 ```
 
-JSONリストの形式：
-
+JSONの形式：
 ```json
 [
   {
@@ -140,20 +120,70 @@ JSONリストの形式：
 
 ---
 
+### B. 音声データ拡張の準備（モデル (2) 用）
+
+音声データによる拡張学習（モデル (2)）に必要なコーパスを準備します。
+
+```
+prepare/1.1_ATR_nhk.ipynb         # ATR503・NHK40 音声コーパス → VAD JSON生成
+prepare/1_commonvoice_json_.ipynb  # Common Voice 日本語 → VAD JSON生成
+```
+
+---
+
+### C. ラベルなしデータの準備（モデル (4) 用）
+
+#### ステップ C-1：多チャンネル合成・HPFフィルタ
+```
+prepare/0.1_db_combined_HPF.ipynb
+```
+ラベルなし実環境録音（4チャンネル：MIC1〜MIC4）をチャンネル合成し，100 Hz ハイパスフィルタを適用してシングルチャンネルWAVを生成します。
+
+処理後のWAVを `dataset/no_label/` 以下に配置してください：
+```
+dataset/no_label/<収録日>/<参加者ID>/
+    ├── MIC1.WAV
+    ├── MIC2.WAV
+    ├── MIC3.WAV
+    └── MIC4.WAV
+```
+
+> Stage 2 の学習（`semi_supervised_top.py`）は `--unlabeled-root` 以下の `.wav` を再帰的に探索します。
+> 多チャンネルWAVはコードが自動的にチャンネル平均するため，前処理前の `dataset/no_label/` を直接指定しても動作します。
+
+---
+
 ## prepare/ ノートブック一覧
 
-| ノートブック | 用途 | 対応する学習設定 |
-|-------------|------|-----------------|
-| `0_database_preproccessing.ipynb` | 制御環境データセットのダウンロード・整理 | モデル (1) |
-| `0_Eat_behavior_dataset_w.ipynb` | 食事行動データセットのセグメント化・16kHzリサンプリング | モデル (1) |
-| `0.1_db_combined_HPF.ipynb` | 多チャンネルWAVのHPFフィルタ処理・チャンネル合成 | モデル (1) |
-| `2_eating_json.ipynb` | 制御環境データのJSON形式変換 | モデル (1) |
-| `1.1_ATR_nhk.ipynb` | ATR503・NHK40 音声コーパスの前処理・VAD JSON生成 | モデル (2) |
-| `1_commonvoice_json_.ipynb` | Common Voice 日本語データのVAD JSON生成 | モデル (2) |
-| `8_real_data_to_train.ipynb` | ラベル付き実環境データを10秒セグメントに分割してJSON生成 | モデル (3) |
-| `9_tsukagoshi_real_data_to_train.ipynb` | ラベルなし実環境データのセグメント化・JSON生成 | モデル (4) |
-| `4_threshold_check.ipynb` | 検出閾値の精度-再現率曲線分析 | 評価・分析 |
-| `7_test_results.ipynb` | 被験者ごと・IoU閾値ごとの詳細評価 | 評価・分析 |
+**ラベル付きデータ準備（モデル (1)〜(3)）：順番に実行**
+
+| 順番 | ノートブック | 用途 |
+|------|-------------|------|
+| 1 | `0_database_preproccessing.ipynb` | 制御環境データセットのダウンロード・整理 |
+| 2 | `0_Eat_behavior_dataset_w.ipynb` | セグメント化・16kHzリサンプリング |
+| 3 | `2_eating_json.ipynb` | JSON形式への変換 |
+| 4 | `8_real_data_to_train.ipynb` | ラベル付き実環境データを10秒セグメント化してJSON生成（モデル (3) 用） |
+
+**音声データ拡張準備（モデル (2)）：**
+
+| ノートブック | 用途 |
+|-------------|------|
+| `1.1_ATR_nhk.ipynb` | ATR503・NHK40 音声コーパスの前処理・VAD JSON生成 |
+| `1_commonvoice_json_.ipynb` | Common Voice 日本語データのVAD JSON生成 |
+
+**ラベルなしデータ準備（モデル (4)）：**
+
+| ノートブック | 用途 |
+|-------------|------|
+| `0.1_db_combined_HPF.ipynb` | ラベルなし多チャンネルWAVのHPFフィルタ処理・チャンネル合成 |
+| `9_tsukagoshi_real_data_to_train.ipynb` | ラベルなし実環境データのセグメント化（補助） |
+
+**評価・分析：**
+
+| ノートブック | 用途 |
+|-------------|------|
+| `4_threshold_check.ipynb` | 検出閾値の精度-再現率曲線分析 |
+| `7_test_results.ipynb` | 被験者ごと・IoU閾値ごとの詳細評価 |
 
 ---
 

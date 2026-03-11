@@ -1,0 +1,71 @@
+{
+  "experiment_name": "2_3_4_class_comparison",
+  "description": "Comparison between 2-class, 3-class, and 4-class classification using WavLM + GRU architecture",
+  
+  "base_config": {
+    "sr": 16000,
+    "ssl_hop_length": 320,
+    "batch_size": 4,
+    "num_epochs": 3000,
+    "early_stopping_patience": 20,
+    "threshold": 0.5,
+    
+    "optimizer": "adam",
+    "lr": 1e-08,
+    "momentum": 0.9,
+    
+    "lr_scheduler": "plateau",
+    "patience": 1,
+    "factor": 0.95,
+    "min_lr": 1e-9,
+    
+    "base_save_dir": "./results_20251122_top_08",
+    "device": "cuda:0",
+    
+    "ssl_model_name": "microsoft/wavlm-base",
+    "architecture": "gru",
+    "feature_type": "raw",
+    "freeze_feature_extractor": true,
+    "freeze_transformer_layers": false,
+    "default_freeze_fe": true,
+    "default_freeze_transformer": false,
+    "class_weight_strategy": "balanced",
+    "train_json": "/home/tsukagoshitoshihiro/workspace/ICASSP/Semi_supervise/json/fit1/exist_label_train.json",
+    "val_json": "/home/tsukagoshitoshihiro/workspace/ICASSP/Semi_supervise/json/fit1/exist_label_valid.json",
+    "test_json": "/home/tsukagoshitoshihiro/workspace/ICASSP/Semi_supervise/json/fit1/exist_label_valid.json",
+
+    "inference_chunk_sec": 10.0,
+    "inference_overlap_sec": 3.0,
+    "classes": ["swallowing", "chewing", "others"]
+  },
+  
+  "experiments": {
+    "2_class": {
+      "name": "2class_swallowing_vs_others",
+      "pretrained_root_dir": "./results_classification_comparison_re_re_ft",
+      "classes": ["swallowing", "others"],
+      "description": "2-class classification: swallowing vs others (chewing + speech + background)",
+      "class_mapping": {
+        "swallowing": "swallowing",
+        "chewing": "others",
+        "speech": "others",
+        "background": "others",
+        "blank": "others"
+      }
+    }
+  },
+  
+  "evaluation_metrics": {
+    "primary": ["precision", "recall", "f1"],
+    "secondary": ["accuracy", "confusion_matrix"],
+    "per_class": true,
+    "iou_thresholds": [0.1, 0.3, 0.5, 0.7, 0.9]
+  },
+  
+  "data_augmentation": {
+    "time_stretch": [0.8, 1.2],
+    "pitch_shift": [-2, 2],
+    "noise_injection": 0.02,
+    "silence_padding": true
+  }
+}

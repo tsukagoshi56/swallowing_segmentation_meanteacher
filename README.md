@@ -62,11 +62,16 @@ prepare/0_database_preproccessing.ipynb
 ```
 食事行動データセット（制御環境録音）を Google Drive からダウンロードし，WAV・アノテーションファイルを整理します。
 
-#### ステップ A-2：データセグメント化・リサンプリング
+#### ステップ A-2：食事行動データセットのダウンロード・前処理・セグメント化
 ```
 prepare/0_Eat_behavior_dataset_w.ipynb
 ```
-音声を16kHzにリサンプリングし，チューイング・嚥下・ノイズのラベルとともにセグメント化します。
+Google Drive からデータセット（`Dataset_enge_ラベル&データ確認済`）をダウンロードし，以下の処理を一括で行います：
+- 指定マイク（TM02）チャンネルの抽出
+- 16kHz リサンプリング
+- 10秒セグメント（オーバーラップ2秒）への分割
+- セグメントごとのアノテーション `.txt` ファイル生成
+- 100Hz ハイパスフィルタの適用
 
 #### ステップ A-3：JSON形式への変換
 ```
@@ -160,7 +165,7 @@ dataset/no_label/<収録日>/<参加者ID>/
 | 順番 | ノートブック | 用途 |
 |------|-------------|------|
 | 1 | `0_database_preproccessing.ipynb` | 制御環境データセットのダウンロード・整理 |
-| 2 | `0_Eat_behavior_dataset_w.ipynb` | セグメント化・16kHzリサンプリング |
+| 2 | `0_Eat_behavior_dataset_w.ipynb` | データDL・マイク抽出・16kHzリサンプリング・10秒分割・アノテーション生成・HPF |
 | 3 | `2_eating_json.ipynb` | JSON形式への変換 |
 | 4 | `8_real_data_to_train.ipynb` | ラベル付き実環境データを10秒セグメント化してJSON生成（モデル (3) 用） |
 
